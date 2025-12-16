@@ -32,10 +32,11 @@ To use this server with an MCP client (like Claude Desktop or another MCP-compli
 {
   "mcpServers": {
     "subtitle": {
-      "command": "uv",
+      "command": "uvx",
       "args": [
-        "run",
-        "/absolute/path/to/mcp-subtitle/server.py"
+        "--from",
+        "git+https://github.com/gaoyifan/mcp-subtitle",
+        "mcp-subtitle"
       ]
     }
   }
