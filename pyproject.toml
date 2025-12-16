@@ -1,0 +1,20 @@
+[project]
+name = "mcp-subtitle"
+version = "0.1.0"
+description = "MCP server for extracting subtitles from videos"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp",
+    "yt-dlp",
+    "mlx-whisper",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.uv]
+package = true
