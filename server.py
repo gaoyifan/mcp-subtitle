@@ -163,7 +163,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
              else:
                  subtitle_content = "\n".join(seg["text"].strip() for seg in segments)
              
-             return f"title: {info.get('title', 'Unknown')}\nsubtitles:\n{subtitle_content}"
+             return f"Title: {info.get('title', 'Unknown')}\nSubtitles:\n{subtitle_content}"
         except Exception as e:
              logger.error(f"Transcription failed: {e}")
              raise RuntimeError(f"Transcription failed: {str(e)}")
