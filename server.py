@@ -168,6 +168,9 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
              logger.error(f"Transcription failed: {e}")
              raise RuntimeError(f"Transcription failed: {str(e)}")
 
+def main():
+    mcp.run()
+
 # This allows running the server directly
 if __name__ == "__main__":
-    mcp.run()
+    main()

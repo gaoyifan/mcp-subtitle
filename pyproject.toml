@@ -16,5 +16,8 @@ dev = [
     "pytest-asyncio",
 ]
 
+[project.scripts]
+mcp-subtitle = "server:main"
+
 [tool.uv]
 package = true

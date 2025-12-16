@@ -45,7 +45,7 @@ To use this server with an MCP client (like Claude Desktop or another MCP-compli
 Or run it ephemerally:
 
 ```bash
-uvx --from . server.py
+uvx --from git+https://github.com/gaoyifan/mcp-subtitle mcp-subtitle
 ```
 
 ### Development & Testing
