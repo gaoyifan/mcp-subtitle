@@ -49,6 +49,15 @@ Or run it ephemerally:
 uvx --from git+https://github.com/gaoyifan/mcp-subtitle mcp-subtitle
 ```
 
+### SSE Mode
+
+To run the server in SSE mode (e.g. for inspection or remote access):
+
+```bash
+uv run server.py --sse --port 8000
+```
+
+
 ### Development & Testing
 
 ```bash

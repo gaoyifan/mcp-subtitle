@@ -169,7 +169,19 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
              raise RuntimeError(f"Transcription failed: {str(e)}")
 
 def main():
-    mcp.run()
+    import argparse
+    parser = argparse.ArgumentParser(description="MCP Subtitle Server")
+    parser.add_argument("--sse", action="store_true", help="Run in SSE mode")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (SSE mode only)")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to (SSE mode only)")
+    
+    args = parser.parse_args()
+    
+    if args.sse:
+        logger.info(f"Starting SSE server on {args.host}:{args.port}")
+        mcp.run(transport="sse", host=args.host, port=args.port)
+    else:
+        mcp.run()
 
 # This allows running the server directly
 if __name__ == "__main__":
