@@ -25,7 +25,7 @@ def find_audio_files(path, extensions):
     return [f for f in os.listdir(path) if any(f.endswith(ext) for ext in extensions)]
 
 def find_audio_format_id(info):
-    return "bestaudio[filesize<20M]" # Limit size for faster processing
+    return "bestaudio[abr<96]/bestaudio" # Limit bitrate to 96kbps
 
 @mcp.tool()
 async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str:
