@@ -38,7 +38,7 @@ def find_audio_files(path, extensions):
 
 
 def find_audio_format_id(info):
-    return "bestaudio[abr<96]/bestaudio"  # Limit bitrate to 96kbps
+    return "bestaudio[abr<144]/bestaudio"  # Limit bitrate to 144kbps
 
 
 @mcp.tool()
