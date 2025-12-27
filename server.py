@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import tempfile
+from collections import Counter
 from typing import Annotated
 
 import mlx_whisper
@@ -14,6 +15,15 @@ mcp = FastMCP("subtitle-server")
 # Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+BLACKLIST = [
+    "明镜与点点",
+    "订阅明镜",
+    "字幕志愿者",
+    "优优独播剧场",
+    "汇聚精英",
+    "字幕提供者",
+]
 
 
 def run_sync_in_executor(func, *args, **kwargs):
@@ -157,9 +167,31 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         # path_or_uri: str, path_or_uri to the audio file
         # model: str = "mlx-community/whisper-large-v3-mlx"
         try:
-            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx")
+            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx", condition_on_previous_text=True)
             # Use segments for better line break handling
             segments = result.get("segments", [])
+
+            # Check quality
+            segment_texts = [s.get("text", "").strip() for s in segments]
+
+            # Check 1: Repetitions
+            text_counts = Counter(segment_texts)
+            has_repetition = any(count > 10 for count in text_counts.values())
+
+            # Check 2: Blacklist
+            blacklist_hits = 0
+            for text in segment_texts:
+                for bad_word in BLACKLIST:
+                    if bad_word in text:
+                        blacklist_hits += 1
+
+            if has_repetition or blacklist_hits > 3:
+                logger.warning(
+                    f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}). Retrying with condition_on_previous_text=False"
+                )
+                result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx", condition_on_previous_text=False)
+                segments = result.get("segments", [])
+
             if not segments and "text" in result:
                 subtitle_content = result["text"]
             else:
