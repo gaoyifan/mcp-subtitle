@@ -60,7 +60,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         "remote_components": {"ejs:github"},
     }
 
-    with yt_dlp.YoutubeDL(common_options) as ydl:
+    with yt_dlp.YoutubeDL(common_options.copy()) as ydl:
         # Extract info without downloading
         info = await run_sync_in_executor(ydl.extract_info, url, download=False, process=False)
 
@@ -107,11 +107,11 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         logger.info(f"Found subtitle: {subtitle}")
         with tempfile.TemporaryDirectory() as tmpdir:
             options = {
+                **common_options,
                 "outtmpl": f"{tmpdir}/output.%(ext)s",
                 "skip_download": True,
                 "subtitleslangs": [subtitle[1]],
                 "subtitlesformat": "json3",
-                **common_options,
             }
             if subtitle[0] == "sub":
                 options["writesubtitles"] = True
@@ -152,6 +152,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
     logger.info("Transcribing audio...")
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_options = {
+            **common_options,
             "format": find_audio_format_id(info),
             "outtmpl": f"{tmpdir}/audio.%(ext)s",
             "postprocessors": [
@@ -160,7 +161,6 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                     "preferredcodec": "m4a",
                 }
             ],
-            **common_options,
         }
         with yt_dlp.YoutubeDL(audio_options) as ydl:
             await run_sync_in_executor(ydl.download, [url])
