@@ -55,7 +55,12 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
     sub_preferences_zh = ["zh-CN", "zh-Hans", "zh", "zh-Hant", "zh-TW", "zh-HK", "zh-SG"]
     autosub_preferences = ["en"]
 
-    with yt_dlp.YoutubeDL() as ydl:
+    # Common options to allow JS challenge solving
+    common_options = {
+        "remote_components": {"ejs:github"},
+    }
+
+    with yt_dlp.YoutubeDL(common_options) as ydl:
         # Extract info without downloading
         info = await run_sync_in_executor(ydl.extract_info, url, download=False, process=False)
 
@@ -106,6 +111,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                 "skip_download": True,
                 "subtitleslangs": [subtitle[1]],
                 "subtitlesformat": "json3",
+                **common_options,
             }
             if subtitle[0] == "sub":
                 options["writesubtitles"] = True
@@ -154,11 +160,12 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                     "preferredcodec": "m4a",
                 }
             ],
+            **common_options,
         }
         with yt_dlp.YoutubeDL(audio_options) as ydl:
             await run_sync_in_executor(ydl.download, [url])
 
-        audio_files = find_audio_files(tmpdir, [".m4a", ".mp3", ".webm", ".mp4"])
+        audio_files = find_audio_files(tmpdir, [".m4a", ".webm", ".mp3", ".mp4"])
         if not audio_files:
             raise RuntimeError("Failed to download audio")
 
