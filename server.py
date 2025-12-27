@@ -155,6 +155,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
             **common_options,
             "format": find_audio_format_id(info),
             "outtmpl": f"{tmpdir}/audio.%(ext)s",
+            "concurrent_fragment_downloads": 4,
             "postprocessors": [
                 {
                     "key": "FFmpegExtractAudio",
