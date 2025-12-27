@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import tempfile
+import re
 from collections import Counter
 from typing import Annotated
 
@@ -185,9 +186,16 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                     if bad_word in text:
                         blacklist_hits += 1
 
-            if has_repetition or blacklist_hits > 3:
+            # Check 3: Character Repetition
+            has_char_repetition = False
+            for text in segment_texts:
+                if re.search(r"(.)\1{19,}", text):
+                    has_char_repetition = True
+                    break
+
+            if has_repetition or blacklist_hits > 3 or has_char_repetition:
                 logger.warning(
-                    f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}). Retrying with condition_on_previous_text=False"
+                    f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}, char_repetition={has_char_repetition}). Retrying with condition_on_previous_text=False"
                 )
                 result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx", condition_on_previous_text=False)
                 segments = result.get("segments", [])
