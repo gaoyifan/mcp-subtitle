@@ -26,6 +26,8 @@ BLACKLIST = [
     "字幕提供者",
 ]
 
+WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+
 
 def run_sync_in_executor(func, *args, **kwargs):
     import asyncio
@@ -176,7 +178,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         # path_or_uri: str, path_or_uri to the audio file
         # model: str = "mlx-community/whisper-large-v3-mlx"
         try:
-            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx", condition_on_previous_text=True)
+            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=True)
             # Use segments for better line break handling
             segments = result.get("segments", [])
 
@@ -205,7 +207,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                 logger.warning(
                     f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}, char_repetition={has_char_repetition}). Retrying with condition_on_previous_text=False"
                 )
-                result = mlx_whisper.transcribe(audio_path, path_or_hf_repo="mlx-community/whisper-large-v3-mlx", condition_on_previous_text=False)
+                result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=False)
                 segments = result.get("segments", [])
 
             if not segments and "text" in result:
