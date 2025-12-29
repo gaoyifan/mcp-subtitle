@@ -30,11 +30,11 @@ BLACKLIST = [
 ]
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
-CACHE_DIR = Path.home() / ".cache" / "mcp-subtitle"
+CACHE_DIR = Path(os.getenv("MCP_SUBTITLE_CACHE_DIR", str(Path.home() / ".cache" / "mcp-subtitle")))
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-# Global dictionary to track running tasks: url -> asyncio.Task
-TASKS: Dict[str, asyncio.Task] = {}
+# Global dictionary to track running tasks: (url, language) -> asyncio.Task
+TASKS: Dict[tuple[str, str], asyncio.Task] = {}
 # Global semaphore to limit concurrent background tasks
 SEM = asyncio.Semaphore(2)
 
@@ -54,12 +54,12 @@ def find_audio_format_id(info):
     return "bestaudio[abr<144]/bestaudio"  # Limit bitrate to 144kbps
 
 
-def _get_cache_path(url: str) -> Path:
-    url_hash = hashlib.md5(url.encode("utf-8")).hexdigest()
+def _get_cache_path(url: str, language: str = "auto") -> Path:
+    url_hash = hashlib.md5(f"{url}|{language}".encode("utf-8")).hexdigest()
     return CACHE_DIR / f"{url_hash}.json"
 
 
-async def _fetch_subtitles_impl(url: str) -> str:
+async def _fetch_subtitles_impl(url: str, language: str = "auto") -> str:
     """
     Internal implementation of subtitle extraction.
     """
@@ -78,13 +78,26 @@ async def _fetch_subtitles_impl(url: str) -> str:
         # Extract info without downloading
         info = await run_sync_in_executor(ydl.extract_info, url, download=False, process=False)
 
-    # Determine language preference based on title characters
-    if "title" in info and len([c for c in info["title"] if ord(c) in range(0x3400, 0xA000)]) >= 5:
-        sub_preferences = sub_preferences_zh + sub_preferences_en
-        logger.info("Guessed language: zh")
+    # Determine language preference
+    if language != "auto":
+        guessed_language = language
+        if language in sub_preferences_zh:
+            sub_preferences = sub_preferences_zh + sub_preferences_en
+        else:
+            sub_preferences = sub_preferences_en + sub_preferences_zh
+        logger.info(f"Using provided language: {language}")
     else:
-        sub_preferences = sub_preferences_en + sub_preferences_zh
-        logger.info("Guessed language: en")
+        # Determine language preference based on title characters
+        if "title" in info and len([c for c in info["title"] if ord(c) in range(0x3400, 0xA000)]) >= 5:
+            sub_preferences = sub_preferences_zh + sub_preferences_en
+            guessed_language = "zh"
+        else:
+            sub_preferences = sub_preferences_en + sub_preferences_zh
+            guessed_language = "en"
+        logger.info(f"Guessed language: {guessed_language}")
+
+    # Whisper decode options
+    whisper_language = "zh" if guessed_language == "zh" else None
 
     subtitle = None
 
@@ -196,7 +209,8 @@ async def _fetch_subtitles_impl(url: str) -> str:
                 mlx_whisper.transcribe,
                 audio_path,
                 path_or_hf_repo=WHISPER_MODEL,
-                condition_on_previous_text=enable_previous_text
+                condition_on_previous_text=enable_previous_text,
+                language=whisper_language
             )
             # Use segments for better line break handling
             segments = result.get("segments", [])
@@ -230,8 +244,9 @@ async def _fetch_subtitles_impl(url: str) -> str:
                 result = await run_sync_in_executor(
                     mlx_whisper.transcribe,
                     audio_path,
-                    path_or_hf_repo=WHISPER_MODEL,
-                    condition_on_previous_text=False
+                    path_or_hf_repo="mlx-community/whisper-large-v3-mlx",
+                    condition_on_previous_text=False,
+                    language=whisper_language
                 )
                 segments = result.get("segments", [])
 
@@ -246,16 +261,16 @@ async def _fetch_subtitles_impl(url: str) -> str:
             raise RuntimeError(f"Transcription failed: {str(e)}")
 
 
-async def _background_worker(url: str):
+async def _background_worker(url: str, language: str = "auto"):
     """
     Background task wrapper that handles caching and cleanup.
     Limit concurrent tasks using SEM.
     """
     try:
         async with SEM:
-            result = await _fetch_subtitles_impl(url)
+            result = await _fetch_subtitles_impl(url, language)
             # Json cache if successful
-            cache_path = _get_cache_path(url)
+            cache_path = _get_cache_path(url, language)
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False)
             logger.info(f"Cached result for {url} to {cache_path}")
@@ -265,39 +280,43 @@ async def _background_worker(url: str):
         raise e
     finally:
         # Cleanup task
-        if url in TASKS:
-            del TASKS[url]
+        if (url, language) in TASKS:
+            del TASKS[(url, language)]
 
 
 @mcp.tool()
-async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str:
+async def get_subtitles(
+    url: Annotated[str, "URL of the YouTube video."],
+    language: Annotated[str, "Language for subtitles (default: auto)."] = "auto",
+    use_cache: Annotated[bool, "Whether to use cached results if available."] = True,
+) -> str:
     """
     Extracts subtitles from a video.
     First attempts to download existing subtitles (manual, then auto-generated).
     If none are available, transcribes the audio using mlx-whisper.
     """
     # 1. Check cache
-    cache_path = _get_cache_path(url)
-    if cache_path.exists():
+    cache_path = _get_cache_path(url, language)
+    if use_cache and cache_path.exists():
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
-                logger.info(f"Serving from cache: {url}")
+                logger.info(f"Serving from cache: {url} (lang: {language})")
                 return json.load(f)
         except Exception as e:
             logger.warning(f"Failed to load cache for {url}: {e}")
 
     # 2. Check for running task
-    if url in TASKS:
-        logger.info(f"Joining existing task for {url}")
-        return await TASKS[url]
+    if (url, language) in TASKS:
+        logger.info(f"Joining existing task for {url} (lang: {language})")
+        return await TASKS[(url, language)]
 
     # 3. Start new task
-    logger.info(f"Starting new background task for {url}")
+    logger.info(f"Starting new background task for {url} (lang: {language})")
     # Create the task but don't await it immediately in a way that cancellation kills the task
     # We want the task to survive cancellation.
     # We use await asyncio.shield(task) to protect the task.
-    task = asyncio.create_task(_background_worker(url))
-    TASKS[url] = task
+    task = asyncio.create_task(_background_worker(url, language))
+    TASKS[(url, language)] = task
 
     try:
         return await task
