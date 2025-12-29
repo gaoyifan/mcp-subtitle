@@ -172,7 +172,14 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         # path_or_uri: str, path_or_uri to the audio file
         # model: str = "mlx-community/whisper-large-v3-mlx"
         try:
-            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=True)
+            duration = info.get("duration") or 0
+            if duration > 1800:
+                logger.info(f"Video duration {duration}s > 30m, disabling condition_on_previous_text")
+                enable_previous_text = False
+            else:
+                enable_previous_text = True
+
+            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=enable_previous_text)
             # Use segments for better line break handling
             segments = result.get("segments", [])
 
@@ -197,7 +204,7 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                     has_char_repetition = True
                     break
 
-            if has_repetition or blacklist_hits > 3 or has_char_repetition:
+            if (has_repetition or blacklist_hits > 3 or has_char_repetition) and enable_previous_text:
                 logger.warning(
                     f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}, char_repetition={has_char_repetition}). Retrying with condition_on_previous_text=False"
                 )
