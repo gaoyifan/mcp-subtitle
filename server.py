@@ -3,8 +3,11 @@ import logging
 import os
 import tempfile
 import re
+import asyncio
+import hashlib
+from pathlib import Path
 from collections import Counter
-from typing import Annotated
+from typing import Annotated, Dict
 
 import mlx_whisper
 import yt_dlp
@@ -27,6 +30,13 @@ BLACKLIST = [
 ]
 
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+CACHE_DIR = Path.home() / ".cache" / "mcp-subtitle"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Global dictionary to track running tasks: url -> asyncio.Task
+TASKS: Dict[str, asyncio.Task] = {}
+# Global semaphore to limit concurrent background tasks
+SEM = asyncio.Semaphore(2)
 
 
 def run_sync_in_executor(func, *args, **kwargs):
@@ -44,12 +54,14 @@ def find_audio_format_id(info):
     return "bestaudio[abr<144]/bestaudio"  # Limit bitrate to 144kbps
 
 
-@mcp.tool()
-async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str:
+def _get_cache_path(url: str) -> Path:
+    url_hash = hashlib.md5(url.encode("utf-8")).hexdigest()
+    return CACHE_DIR / f"{url_hash}.json"
+
+
+async def _fetch_subtitles_impl(url: str) -> str:
     """
-    Extracts subtitles from a video.
-    First attempts to download existing subtitles (manual, then auto-generated).
-    If none are available, transcribes the audio using mlx-whisper.
+    Internal implementation of subtitle extraction.
     """
     logger.info(f"Processing URL: {url}")
 
@@ -179,7 +191,13 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
             else:
                 enable_previous_text = True
 
-            result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=enable_previous_text)
+            # Run transcription in executor to avoid blocking event loop
+            result = await run_sync_in_executor(
+                mlx_whisper.transcribe,
+                audio_path,
+                path_or_hf_repo=WHISPER_MODEL,
+                condition_on_previous_text=enable_previous_text
+            )
             # Use segments for better line break handling
             segments = result.get("segments", [])
 
@@ -208,7 +226,13 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
                 logger.warning(
                     f"Bad transcription detected (repetition={has_repetition}, blacklist_hits={blacklist_hits}, char_repetition={has_char_repetition}). Retrying with condition_on_previous_text=False"
                 )
-                result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=WHISPER_MODEL, condition_on_previous_text=False)
+                # Run retry in executor as well
+                result = await run_sync_in_executor(
+                    mlx_whisper.transcribe,
+                    audio_path,
+                    path_or_hf_repo=WHISPER_MODEL,
+                    condition_on_previous_text=False
+                )
                 segments = result.get("segments", [])
 
             if not segments and "text" in result:
@@ -220,6 +244,71 @@ async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str
         except Exception as e:
             logger.error(f"Transcription failed: {e}")
             raise RuntimeError(f"Transcription failed: {str(e)}")
+
+
+async def _background_worker(url: str):
+    """
+    Background task wrapper that handles caching and cleanup.
+    Limit concurrent tasks using SEM.
+    """
+    try:
+        async with SEM:
+            result = await _fetch_subtitles_impl(url)
+            # Json cache if successful
+            cache_path = _get_cache_path(url)
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, ensure_ascii=False)
+            logger.info(f"Cached result for {url} to {cache_path}")
+            return result
+    except Exception as e:
+        logger.error(f"Background task failed for {url}: {e}")
+        raise e
+    finally:
+        # Cleanup task
+        if url in TASKS:
+            del TASKS[url]
+
+
+@mcp.tool()
+async def get_subtitles(url: Annotated[str, "URL of the YouTube video."]) -> str:
+    """
+    Extracts subtitles from a video.
+    First attempts to download existing subtitles (manual, then auto-generated).
+    If none are available, transcribes the audio using mlx-whisper.
+    """
+    # 1. Check cache
+    cache_path = _get_cache_path(url)
+    if cache_path.exists():
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                logger.info(f"Serving from cache: {url}")
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to load cache for {url}: {e}")
+
+    # 2. Check for running task
+    if url in TASKS:
+        logger.info(f"Joining existing task for {url}")
+        return await TASKS[url]
+
+    # 3. Start new task
+    logger.info(f"Starting new background task for {url}")
+    # Create the task but don't await it immediately in a way that cancellation kills the task
+    # We want the task to survive cancellation.
+    # We use await asyncio.shield(task) to protect the task.
+    task = asyncio.create_task(_background_worker(url))
+    TASKS[url] = task
+
+    try:
+        return await task
+    except asyncio.CancelledError:
+        logger.info(f"Client disconnected for {url}, task continues in background")
+        # Ensure the task continues running even if this await is cancelled
+        # If we cancel here, we MUST not cancel the task.
+        # However, await task will propagate cancellation to the task if we don't shield it.
+        # Wait, if I await task, and I get cancelled, the expected behavior is that the task gets cancelled.
+        # To prevent this, requests handlers MUST use shield.
+        return await asyncio.shield(task)
 
 
 def main():
