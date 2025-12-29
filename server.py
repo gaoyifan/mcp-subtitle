@@ -96,8 +96,9 @@ async def _fetch_subtitles_impl(url: str, language: str = "auto") -> str:
             guessed_language = "en"
         logger.info(f"Guessed language: {guessed_language}")
 
-    # Whisper decode options
-    whisper_language = "zh" if guessed_language == "zh" else None
+    # For Whisper transcription, we force "zh" if the language is Chinese-like.
+    # Otherwise, we leave it as None for automatic detection per requirements.
+    whisper_language = "zh" if guessed_language in sub_preferences_zh else None
 
     subtitle = None
 
