@@ -306,12 +306,22 @@ def main():
     parser.add_argument("--sse", action="store_true", help="Run in SSE mode")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (SSE mode only)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to (SSE mode only)")
+    parser.add_argument("--ssl-certfile", help="Path to SSL certificate file (SSE mode only)")
+    parser.add_argument("--ssl-keyfile", help="Path to SSL private key file (SSE mode only)")
 
     args = parser.parse_args()
 
     if args.sse:
+        if (args.ssl_certfile and not args.ssl_keyfile) or (args.ssl_keyfile and not args.ssl_certfile):
+            parser.error("--ssl-certfile and --ssl-keyfile must be provided together")
         logger.info(f"Starting SSE server on {args.host}:{args.port}")
-        mcp.run(transport="sse", host=args.host, port=args.port)
+        run_kwargs = {}
+        if args.ssl_certfile and args.ssl_keyfile:
+            run_kwargs["uvicorn_config"] = {
+                "ssl_certfile": args.ssl_certfile,
+                "ssl_keyfile": args.ssl_keyfile,
+            }
+        mcp.run(transport="sse", host=args.host, port=args.port, **run_kwargs)
     else:
         mcp.run()
 

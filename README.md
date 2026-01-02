@@ -76,6 +76,12 @@ To run the server in SSE mode (e.g. for inspection or remote access):
 uv run server.py --sse --port 8000
 ```
 
+With HTTPS (provide cert and key files):
+
+```bash
+uv run server.py --sse --port 8000 --ssl-certfile /path/to/cert.pem --ssl-keyfile /path/to/key.pem
+```
+
 ### Remote SSE MCP Config
 
 To connect to a remote SSE server, point your client at its URL:
